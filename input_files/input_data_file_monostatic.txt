@@ -1,0 +1,26 @@
+# input model (file in stl_models/)
+cylinder_feko.stl
+# radar frequency (GHz)
+30
+# correlation distance (m)
+0
+# standard deviation (m)
+0
+# incident wave polarization (0=TM-z, 1=TE-z)
+0
+# material resistivity (0=PEC, 1=material specific)
+0
+# start phi angle (deg)
+0
+# stop phi angle (deg)
+0
+# phi increment step (deg)
+0
+# start theta angle (deg)
+0
+# stop theta angle (deg)
+360
+# theta increment step (deg)
+2
+# matrl file path (or "configure" for material setup)
+matrl.txt
