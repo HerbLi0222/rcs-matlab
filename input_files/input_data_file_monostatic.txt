@@ -1,7 +1,7 @@
 # input model (file in stl_models/)
-cylinder_feko.stl
+aim-7.stl
 # radar frequency (GHz)
-30
+3
 # correlation distance (m)
 0
 # standard deviation (m)

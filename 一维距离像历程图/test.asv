@@ -1,0 +1,98 @@
+clear, clc;
+
+% 光速定义
+c = 3e8;
+
+% 雷达系统参数
+center_freq = 3e9; 
+bandwidth = 2e9;
+freq_points = 501;
+fre_interval = bandwidth/(freq_points-1);
+angle_resolution = 0.005;
+start_theta = 29;
+end_theta = 31;
+
+% 频率点生成
+low_freq = center_freq - bandwidth / 2;
+high_freq = center_freq + bandwidth / 2;
+frequencies = linspace(low_freq, high_freq, freq_points);
+
+%角度生成
+azimuth_angles = start_theta:angle_resolution:end_theta;
+angle_count = length(azimuth_angles);
+
+dx=c/bandwidth/2; %距离向分辨率
+x_width = c/2/fre_interval; %距离向宽度
+dy=c/center_freq/2/(end_theta-start_theta); %方位向分辨率
+y_width = c/2/center_freq/angle_resolution; %方位向宽度
+
+% 几何体配置
+cylinder_radius = 8;
+cylinder_height = 4*sqrt(3);
+
+% 回波信号初始化
+echo_signal = zeros(freq_points, angle_count);
+kx = zeros(freq_points, angle_count);
+ky = zeros(freq_points, angle_count);
+
+for idx_freq = 1:freq_points
+    echo_signal(idx_freq, :) = calculate_scattered_field(frequencies(idx_freq), cylinder_radius, cylinder_height, azimuth_angles);
+    kx(idx_freq, :) = 4*pi/c*frequencies(idx_freq)*cos(azimuth_angles);
+    ky(idx_freq, :) = 4*pi/c*frequencies(idx_freq)*sin(azimuth_angles);
+end
+
+kx_min = min(kx(:));
+kx_max = max(kx(:));
+ky_min = min(ky(:));
+ky_max = max(ky(:));
+
+N = angle_count; % 目标图像宽度
+M = freq_points; % 目标图像高度
+
+% 初始化目标图像
+S_prime = zeros(N, M);
+
+% 对每个点进行插值变换
+for idx_freq = 1:freq_points
+    for idx_angle = 1:angle_count
+        nx = (kx(idx_freq, idx_angle) - kx_min) / (kx_max - kx_min) * (N - 1);
+        ny = (ky(idx_freq, idx_angle) - ky_min) / (ky_max - ky_min) * (M - 1);
+        
+        % 使用双线性插值或其他插值方法填充目标图像
+        S_prime = imresize(echo_signal, [N, M], 'bilinear');
+    end 
+end
+
+% 绘制散射场热力图
+figure;
+te = abs(echo_signal.');
+imagesc(20*log10(abs(echo_signal.')));  % 使用绝对值显示强度
+colorbar;                    % 添加颜色条
+xlabel('频率索引', 'fontsize', 12);
+ylabel('角度索引', 'fontsize', 12);
+title('散射场强度热力图（频率 vs 角度）', 'fontsize', 14);
+colormap('jet');             % 可选：使用 jet 颜色映射
+axis xy;                     % 确保第1行对应最低频率
+
+% 二维傅里叶变换
+isar_image = fftshift(fft2(echo_signal.')); %angle x fre
+
+% 取绝对值并转换为dB单位
+isar_image = abs(isar_image);
+isar_image_db = 20 * log10(isar_image)'; %fre x angle
+
+% 显示ISAR图像
+figure;
+ff=linspace(-(freq_points-1)/2*dx,(freq_points-1)/2*dx,size(isar_image_db,1));
+pp=linspace(-(angle_count-1)/2*dy,(angle_count-1)/2*dy,size(isar_image_db,2));
+imagesc(ff, pp, isar_image_db);
+axis xy;
+colormap('jet');
+colorbar;
+axis([-x_width/2 x_width/2 -y_width/2 y_width/2]);
+axis square
+xlabel('距离向 (m)');
+ylabel('方位向 (m)');
+title('ISAR Image (Intensity in dB)');
+clim = get(gca,'CLim');
+set(gca,'CLim',clim(2) + [-20 0]);
