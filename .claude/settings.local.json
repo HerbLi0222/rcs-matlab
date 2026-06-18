@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/d/MATLAB/R2025b/bin/matlab -batch \"addpath\\('lib'\\); disp\\('Starting 3D reconstruction...'\\); tic; reconstruct_3d_scatterers\\('CenterAngles', [30, 60, 90, 120, 150], 'CleanMaxIter', 30, 'CleanThreshold', 0.05\\); elapsed = toc; fprintf\\('Total: %.1f s\\\\n', elapsed\\);\")",
+      "Bash(/d/MATLAB/R2025b/bin/matlab -batch \"addpath\\('lib'\\); disp\\('Testing STL reading...'\\); tic; reconstruct_3d_scatterers\\('CenterAngles', [45, 90, 135], 'CleanMaxIter', 15\\); elapsed = toc; fprintf\\('Total: %.1f s\\\\n', elapsed\\);\")",
+      "Bash(/d/MATLAB/R2025b/bin/matlab -batch \"addpath\\('lib'\\); disp\\('Testing fixed 3D reconstruction...'\\); tic; reconstruct_3d_scatterers\\('CenterAngles', [30, 60, 90, 120, 150], 'CleanMaxIter', 30\\); elapsed = toc; fprintf\\('Total: %.1f s\\\\n', elapsed\\);\")",
+      "Bash(awk '/^  / && $5==90.0' results/scatter3d_centers_20260618010638.txt)",
+      "Bash(/d/MATLAB/R2025b/bin/matlab -batch \"d=load\\('results/scatter3d_data_20260618010638.mat'\\); sc=d.all_scatterers; for th=[30,60,90,120,150], idx=abs\\(sc\\(:,5\\)-th\\)<0.1; if any\\(idx\\), fprintf\\('th=%d: x=[%.3f,%.3f] z=[%.3f,%.3f] n=%d\\\\n',th,min\\(sc\\(idx,1\\)\\),max\\(sc\\(idx,1\\)\\),min\\(sc\\(idx,3\\)\\),max\\(sc\\(idx,3\\)\\),sum\\(idx\\)\\); end; end\")",
+      "Bash(/d/MATLAB/R2025b/bin/matlab -batch \"addpath\\('lib'\\); disp\\('Running corrected 3D reconstruction...'\\); tic; reconstruct_3d_scatterers\\('CenterAngles', [30, 60, 90, 120, 150], 'CleanMaxIter', 30\\); elapsed = toc; fprintf\\('Total: %.1f s\\\\n', elapsed\\);\")",
+      "Bash(/d/MATLAB/R2025b/bin/matlab -batch \"addpath\\('lib'\\); disp\\('Verifying rollback...'\\); checkcode\\('reconstruct_3d_scatterers.m'\\); disp\\('---'\\); reconstruct_3d_scatterers\\('CenterAngles', [30, 60, 90, 120, 150], 'CleanMaxIter', 20\\);\")",
+      "Bash(matlab -batch \"addpath\\('lib'\\); reconstruct_from_hrrp\" -nosplash -nodesktop)"
+    ]
+  }
+}

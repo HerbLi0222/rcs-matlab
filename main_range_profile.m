@@ -169,18 +169,17 @@ end
 % ---- 2d. 归一化与动态范围 ----
 % 由于 PO 面元法的 far-field 散射场幅值天然很小（|sumt| ~ 1e-3 量级），
 % 经 IFFT 后 dB 值通常落在 -100 ~ -60 dB 范围。
-% 逐角度归一化：每帧距离像减去自身峰值 → 0 dB = 最强散射中心
-normalize_per_angle = true;   % true: 归一化显示距离结构; false: 绝对dB显示
-auto_dyn_range = true;        % true: 自动计算显示范围; false: 手动指定
-dyn_range_min = -60;          % 手动模式下的 dB 下限
-dyn_range_max = 0;            % 手动模式下的 dB 上限
-dyn_range_span = 100;          % 自动模式: 显示峰值以下多少 dB
+% 归一化模式:
+%   'global'    - 全局最大值归一 (0dB=最强散射, 保留角度间RCS差异) [推荐]
+%   'per-angle' - 逐角度归一 (每角度独立峰值, 只看距离结构)
+%   'none'      - 绝对dB值 (用于定量分析)
+normalize_mode = 'global';     % 'global' | 'per-angle' | 'none'
+auto_dyn_range = true;         % true: 自动计算显示范围; false: 手动指定
+dyn_range_min = -60;           % 手动模式下的 dB 下限
+dyn_range_max = 0;             % 手动模式下的 dB 上限
+dyn_range_span = 150;           % 自动模式: 显示峰值以下多少 dB
 epsilon_dB = 1e-10;
-if normalize_per_angle
-    fprintf('  Normalization: per-angle (peak=0 dB, shows relative structure)\n');
-else
-    fprintf('  Normalization: none (absolute dB values)\n');
-end
+fprintf('  Normalization: %s\n', normalize_mode);
 
 %% ========================================================================
 %% 3. 对每个角度生成一维距离像 (核心计算)
@@ -259,12 +258,22 @@ for i_angle = 1:N_angles_total
 
 end
 
-% ---- 3g. 逐角度归一化 (可选) ----
-if normalize_per_angle
-    % 每帧减去自身峰值，使 0 dB = 该角度最强散射中心
-    angle_peaks = max(M_dB, [], 2);  % N_angles x 1
-    M_dB = M_dB - angle_peaks;
-    fprintf('  Per-angle normalization applied.\n');
+% ---- 3g. 归一化 ----
+switch normalize_mode
+    case 'global'
+        % 全局最大值归一: 0dB = 所有角度/距离中的最强散射
+        % 保留角度间的 RCS 差异 → 强散射角度出现垂直峰值线
+        global_peak = max(M_dB(:));
+        M_dB = M_dB - global_peak;
+        fprintf('  Global normalization: peak=%.1f dB, span preserved.\n', global_peak);
+    case 'per-angle'
+        % 逐角度归一: 每帧独立峰值 → 隐藏角度间差异，只看距离结构
+        angle_peaks = max(M_dB, [], 2);
+        M_dB = M_dB - angle_peaks;
+        fprintf('  Per-angle normalization applied.\n');
+    case 'none'
+        % 不归一化，保留绝对 dB 值
+        fprintf('  No normalization (absolute dB).\n');
 end
 
 elapsed = toc;
@@ -325,14 +334,14 @@ set(gcf, 'Name', 'Range Profile Map (距离历程图)', ...
 
 % 自动或手动确定动态范围
 if auto_dyn_range
-    % 使用 2% 分位数作为噪声底板，峰值作为上限
     noise_floor = prctile(M_dB(:), 2);
     signal_peak = max(M_dB(:));
-    if normalize_per_angle
-        dyn_range_min = max(noise_floor, signal_peak - dyn_range_span);
-        dyn_range_max = signal_peak;  % = 0 dB (归一化后)
-    else
+    if strcmp(normalize_mode, 'none')
         dyn_range_min = noise_floor;
+        dyn_range_max = signal_peak;
+    else
+        % 归一化后 signal_peak=0，取峰值以下 dyn_range_span dB 为下限
+        dyn_range_min = max(noise_floor, signal_peak - dyn_range_span);
         dyn_range_max = signal_peak;
     end
     fprintf('  Auto dynamic range: %.0f ~ %.0f dB\n', dyn_range_min, dyn_range_max);
@@ -345,19 +354,15 @@ M_display = M_dB;
 M_display(M_display < dyn_range_min) = dyn_range_min;
 M_display(M_display > dyn_range_max) = dyn_range_max;
 
-imagesc(range_axis, angle_axis, M_display);
+imagesc(angle_axis, range_axis, M_display');
 colormap('jet');
 axis xy;
 
-xlabel('Radial Range (m)', 'FontSize', 12, 'FontWeight', 'bold');
-ylabel(angleLabel, 'FontSize', 12, 'FontWeight', 'bold');
+xlabel(angleLabel, 'FontSize', 12, 'FontWeight', 'bold');
+ylabel('Radial Range (m)', 'FontSize', 12, 'FontWeight', 'bold');
 
 % 构建标题字符串
-if normalize_per_angle
-    normStr = 'Norm: per-angle';
-else
-    normStr = 'Norm: absolute';
-end
+normStr = ['Norm: ' normalize_mode];
 titleStr = sprintf(['Range Profile Map (HRRP 一维距离历程图)\n', ...
     'Model: %s | BW: %.1f GHz | Res: %.2f cm | %s: %.1f%s | Win: %s | %s'], ...
     modelName, B/1e9, delta_r*100, angleStepLabel, angleStep, char(176), windowType, normStr);
@@ -365,10 +370,10 @@ title(titleStr, 'FontSize', 11);
 
 caxis([dyn_range_min, dyn_range_max]);
 cb = colorbar;
-if normalize_per_angle
-    cb.Label.String = 'Relative Intensity (dB)';
-else
+if strcmp(normalize_mode, 'none')
     cb.Label.String = 'Scattering Intensity (dB)';
+else
+    cb.Label.String = 'Relative Intensity (dB)';
 end
 cb.Label.FontSize = 11;
 
@@ -485,6 +490,7 @@ fprintf(fid, '# Format: %d range bins (cols) x %d angles (rows)\n', N_fft, N_ang
 fprintf(fid, '# Range axis (m):\n');
 fprintf(fid, '%.6f ', range_axis);
 fprintf(fid, '\n# Angle axis:\n');
+
 fprintf(fid, '%.3f ', angle_axis);
 fprintf(fid, '\n# HRRP Data (dB), rows=angles, cols=range:\n');
 for i = 1:N_angles_total

@@ -1,0 +1,11 @@
+# HRRP-Based 3D Scattering Centers
+# Model: compond
+# Reference point: [0.0000, 0.0000, 0.0000] m
+# Detection: threshold=-55 dB, cluster_radius=0.100 m
+# Total centers: 4
+#
+# Columns: x(m)  y(m)  z(m)  amplitude_dB  n_obs  angle_span(deg)
+  0.069533  0.000000  -0.152004  -46.51  38  82.0
+  -0.494855  0.000000  -0.590660  -46.71  9  20.0
+  -0.742561  0.000000  0.310055  -50.17  14  32.0
+  -0.287028  0.000000  0.649820  -50.45  5  8.0

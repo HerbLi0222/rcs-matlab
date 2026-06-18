@@ -1,5 +1,5 @@
 # input model (file in stl_models/)
-aim-7.stl
+compond.stl
 # start radar frequency (GHz)
 2
 # stop radar frequency (GHz)

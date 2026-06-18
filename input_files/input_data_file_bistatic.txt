@@ -1,7 +1,7 @@
 # input model (file in stl_models/)
-sidewinder.stl
+compond.stl
 # radar frequency (GHz)
-10
+3
 # correlation distance (m)
 0
 # standard deviation (m)
@@ -21,9 +21,9 @@ sidewinder.stl
 # stop theta angle (deg)
 180
 # theta increment step (deg)
-2
+1
 # theta incidence (deg)
-30
+90
 # phi incidence (deg)
 0
 # matrl file path (or "configure" for material setup)

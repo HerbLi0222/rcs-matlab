@@ -1,0 +1,29 @@
+========================================
+FFT vs PSF 3D Reconstruction Comparison
+========================================
+Model: compond
+Date:  20260618125433
+
+--- Parameters ---
+Center angles: 30   60   90  120  150 deg
+Sub-aperture: 10.0 deg
+FFT threshold: -6 dB
+CLEAN threshold: 0.050, maxIter: 50, gain: 0.50
+Matching radius: 0.150 m
+Phase correction: P_3d = -r*k_hat - x*k_perp
+
+--- Per-Angle Counts ---
+Theta(deg) N_FFT      N_PSF     
+30.0       2          50        
+60.0       1          50        
+90.0       1          50        
+120.0      2          50        
+150.0      2          50        
+
+--- Summary ---
+FFT total:         8
+PSF total:         250
+Matched pairs:     7
+Mean distance:     0.0178 m
+Median distance:   0.0196 m
+Max distance:      0.0393 m

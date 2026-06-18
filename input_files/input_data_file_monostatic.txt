@@ -1,5 +1,5 @@
 # input model (file in stl_models/)
-aim-7.stl
+compond_fine.stl
 # radar frequency (GHz)
 3
 # correlation distance (m)
@@ -19,8 +19,8 @@ aim-7.stl
 # start theta angle (deg)
 0
 # stop theta angle (deg)
-360
+180
 # theta increment step (deg)
-2
+0.5
 # matrl file path (or "configure" for material setup)
 matrl.txt

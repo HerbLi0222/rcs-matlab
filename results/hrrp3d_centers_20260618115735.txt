@@ -1,0 +1,8 @@
+# HRRP-Based 3D Scattering Centers
+# Model: cone_bin
+# Reference point: [0.0000, 0.0000, 0.3750] m
+# Detection: threshold=-35 dB, cluster_radius=0.080 m
+# Total centers: 1
+#
+# Columns: x(m)  y(m)  z(m)  amplitude_dB  n_obs  angle_span(deg)
+  -0.162380  0.000000  0.281250  -18.18  1  0.0
