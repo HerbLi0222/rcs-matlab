@@ -37,13 +37,13 @@ paramNames = {'DataFile','CenterAngles','ApertureDeg','CleanMaxIter',...
 
 p = inputParser;
 p.addOptional('DataFile', '', @(x) ischar(x) || isstring(x) || isempty(x));
-p.addParameter('CenterAngles', [30, 60, 90, 120, 150], @(x) isnumeric(x));
-p.addParameter('ApertureDeg', 30, @(x) isnumeric(x) && isscalar(x));
+p.addParameter('CenterAngles', 0:15:360, @(x) isnumeric(x));
+p.addParameter('ApertureDeg', 10, @(x) isnumeric(x) && isscalar(x));
 p.addParameter('CleanMaxIter', 30, @(x) isnumeric(x) && isscalar(x));
 p.addParameter('CleanThreshold', 0.05, @(x) isnumeric(x) && isscalar(x));
 p.addParameter('CleanGain', 0.6, @(x) isnumeric(x) && isscalar(x));
 p.addParameter('ZeroPadFactor', 2, @(x) isnumeric(x) && isscalar(x));
-p.addParameter('WindowType', 'hamming', @(x) ischar(x) || isstring(x));
+p.addParameter('WindowType', 'chebwin', @(x) ischar(x) || isstring(x));
 
 if ~isempty(varargin) && (ischar(varargin{1}) || isstring(varargin{1})) ...
         && any(strcmp(char(varargin{1}), paramNames))
@@ -70,13 +70,10 @@ fprintf('========================================\n\n');
 
 % --- 1a. 加载 wideband_scattering 数据 ---
 if isempty(resultFile)
-    resultDir = fullfile('results');
-    files = dir(fullfile(resultDir, 'wideband_scattering_*.mat'));
-    if isempty(files)
-        error('No wideband_scattering_*.mat found in %s.\n', resultDir);
+    resultFile = findLatestResultFile('wideband_scattering_*.mat');
+    if isempty(resultFile)
+        error('No wideband_scattering_*.mat found in results/.\n');
     end
-    [~, idx] = sort([files.datenum], 'descend');
-    resultFile = fullfile(resultDir, files(idx(1)).name);
 end
 
 fprintf('Loading wideband scattering data...\n');
@@ -200,13 +197,22 @@ for i_ang = 1:N_angles
     % --- 2d. 坐标轴 ---
     delta_r_pad = delta_r * (N_f / N_r_pad);
     range_axis = (-floor(N_r_pad/2) : ceil(N_r_pad/2)-1) * delta_r_pad;
-    delta_x_pad = delta_x * (N_theta_sub / N_x_pad);
+    % Cross-range 轴: 量程与孔径 Δθ 成比例。
+    % IFFT 输出的 cross-range 座标系中，N_θ 个采样点对应 λ/(2·dθ) 的不模糊窗口。
+    % 为避免量程受 dθ 支配而不随孔径变化，显式用孔径 Δθ 重新标定:
+    %   cross_range 边界 = ± tan(Δθ/2) · (R_max/2)
+    % 其中 R_max/2 取 range 轴正半轴中点，使 cross-range 与物理尺度对齐。
+    R_half = max(range_axis);                        % range 轴正半轴 (m)
+    X_half = R_half * tan(delta_theta_rad_actual / 2); % cross-range 半量程 (m)
+    delta_x_pad = 2 * X_half / N_x_pad;              % bin 间距 (m)
     crossrange_axis = (-floor(N_x_pad/2) : ceil(N_x_pad/2)-1) * delta_x_pad;
 
     % --- 2e. PSF 函数 ---
     psf_func = @(r, x) sincfSAR((2*B/c) * r) .* sincfSAR((2*delta_theta_rad_actual/lambda_c) * x);
 
-    % --- 2f. CLEAN 提取 ---
+    % --- 2f. CLEAN 提取（在图像上找峰位置）---
+    % 保存原始图像：CLEAN 会原地修改 I_fft 为残差
+    I_orig = I_fft;
     [components, ~] = cleanAlgorithmSAR(I_fft, range_axis, crossrange_axis, ...
         psf_func, cleanThreshold, cleanMaxIter, cleanGain);
 
@@ -215,9 +221,18 @@ for i_ang = 1:N_angles
         continue;
     end
 
+    % --- 2g. 用未归一化原始矩阵查表取幅度（跨角度可比）---
+    % 取消 MATLAB ifft2 的 1/(Nx·Nr) 归一化，使幅度跨角度可比
+    I_unnorm = abs(I_orig) * (N_x_pad * N_r_pad);
+    for k = 1:size(components, 1)
+        [~, r_idx] = min(abs(range_axis - components(k, 1)));
+        [~, x_idx] = min(abs(crossrange_axis - components(k, 2)));
+        components(k, 3) = I_unnorm(x_idx, r_idx);
+    end
+
     fprintf('  Extracted %d scattering centers\n', size(components, 1));
 
-    % --- 2g. 2D → 3D 坐标变换 ---
+    % --- 2h. 2D → 3D 坐标变换 ---
     %
     % 关键修正：散射仿真使用 exp(+j·2k·R·P) 相位约定（标准雷达 convention
     % 为 exp(-j·2k·R·P)）。MATLAB IFFT 处理该数据后，(r, x) 坐标发生
@@ -234,7 +249,7 @@ for i_ang = 1:N_angles
     % 对每个散射中心进行逆投影
     r_vals = components(:, 1);   % range (m) — IFFT 输出
     x_vals = components(:, 2);   % cross-range (m) — IFFT 输出
-    A_vals = components(:, 3);   % amplitude
+    A_vals = components(:, 3);   % amplitude（来自未归一化矩阵）
 
     % 修正后的重建公式（取反 r 和 x 以抵消相位约定引入的符号翻转）
     P_3d = - r_vals * k_hat' - x_vals * k_perp';   % N_sc × 3
@@ -243,6 +258,31 @@ for i_ang = 1:N_angles
     N_sc = size(components, 1);
     all_scatterers = [all_scatterers; ...
         P_3d, A_vals, theta0_deg * ones(N_sc, 1)];  %#ok<AGROW>
+
+    % --- 2h. 绘制单角度 SAR 距离-方位图 (SNR 雷达图) ---
+    % I_fft_dB = 20 * log10(abs(I_fft) / max(abs(I_fft(:))));
+    % set(0, 'DefaultFigureVisible', 'off');
+    % sarFig = figure(100 + i_ang);  % 图号偏移避免与1-3冲突
+    % set(0, 'DefaultFigureVisible', 'on');
+    % clf;
+    % set(sarFig, 'Name', sprintf('SAR Image θ₀=%.0f°', theta0_deg), ...
+    %             'NumberTitle', 'off', 'Position', [100, 100, 700, 550]);
+    % imagesc(range_axis, crossrange_axis, I_fft_dB);
+    % colormap('jet'); axis xy;
+    % xlabel('Range (m)', 'FontSize', 11);
+    % ylabel('Cross-Range (m)', 'FontSize', 11);
+    % title(sprintf('SAR Image θ₀=%.0f° Δθ=%.1f° (%d CLEAN centers)', ...
+    %     theta0_deg, rad2deg(delta_theta_rad_actual), N_sc), 'FontSize', 12, 'FontWeight', 'bold');
+    % clim([prctile(I_fft_dB(:), 2), max(I_fft_dB(:))]);
+    % colorbar;
+    % hold on;
+    % 标注 CLEAN 散射中心位置
+    for k = 1:N_sc
+        plot(components(k,1), components(k,2), 'wo', ...
+            'MarkerSize', 6 + 14*components(k,3)/max(components(:,3)), ...
+            'LineWidth', 1);
+    end
+    hold off;
 end
 
 if isempty(all_scatterers)
@@ -277,9 +317,11 @@ fprintf('    Y: [%.3f, %.3f] m\n', min(scat_y), max(scat_y));
 fprintf('    Z: [%.3f, %.3f] m\n', min(scat_z), max(scat_z));
 fprintf('  Reference point P_ref: [%.3f, %.3f, %.3f] m\n', P_ref);
 
-% 幅度归一化 (用于点大小)
-A_norm = scat_A / max(scat_A);
-marker_sizes = 20 + 180 * A_norm;   % 20 ~ 200
+% 幅度转 dB，球大小与 dB 成正比（最强=0dB→200, 最弱→20）
+A_dB = 20 * log10(scat_A / max(scat_A));
+A_norm_dB = (scat_A - min(scat_A)) ./ max(max(scat_A - min(scat_A), 1e-10));
+A_norm_4 = 1-(A_norm_dB-1).^6;
+marker_sizes = 20 + 180 * A_norm_4;
 
 % 按来源角度分配颜色
 unique_thetas = unique(scat_theta);
@@ -331,6 +373,7 @@ end
 
 hold off;
 axis equal;
+xlim([-1,1]); ylim([-1,1]); zlim([-1.5,3])
 grid on;
 box on;
 xlabel('X (m)', 'FontSize', 12, 'FontWeight', 'bold');
@@ -343,7 +386,7 @@ title(sprintf(['3D Scattering Center Reconstruction\n', ...
 
 % 颜色图例
 colormap(gca, cmap);
-caxis([min(unique_thetas), max(unique_thetas)]);
+clim([min(unique_thetas), max(unique_thetas)]);
 cb = colorbar;
 cb.Label.String = 'Source Angle θ₀ (deg)';
 cb.Label.FontSize = 11;
@@ -427,7 +470,7 @@ subplot(1, 2, 1);
 for i = 1:N_colors
     mask = (scat_theta == unique_thetas(i));
     scatter(scat_theta(mask), scat_A(mask), ...
-            40 + 100*A_norm(mask), cmap(i, :), ...
+            40 + 100*A_norm_dB(mask), cmap(i, :), ...
             'filled', 'MarkerEdgeColor', 'k', 'LineWidth', 0.3);
     hold on;
 end
@@ -452,25 +495,37 @@ sgtitle(sprintf('Scattering Center Statistics | Model: %s', modelName), ...
 %% ========================================================================
 fprintf('\nSaving results...\n');
 
-nowStr = datestr(now, 'yyyymmddHHMMSS');
+% Create timestamped result directory
+[resultDir, nowStr] = createResultDir('reconstruct_3d_scatterers');
 
 % 保存各图
+% 保存图1-3 (3D重建图)
 for figNum = 1:3
     if ishandle(figNum)
-        figFile = fullfile('results', sprintf('scatter3d_fig%d_%s.png', figNum, nowStr));
+        figFile = fullfile(resultDir, sprintf('scatter3d_fig%d_%s.png', figNum, nowStr));
         saveas(figNum, figFile);
         fprintf('  Figure %d: %s\n', figNum, figFile);
     end
 end
+% 保存各角度 SAR 距离-方位图 (figNum = 100 + i_ang)
+for i_ang = 1:N_angles
+    sarFig = 100 + i_ang;
+    if ishandle(sarFig)
+        figFile = fullfile(resultDir, sprintf('scatter3d_sar_theta%.0f_%s.png', ...
+            center_angles(i_ang), nowStr));
+        print(sarFig, figFile, '-dpng');
+        fprintf('  SAR θ=%.0f°: %s\n', center_angles(i_ang), figFile);
+    end
+end
 
 % 保存 MAT 数据
-matFile = fullfile('results', ['scatter3d_data_' nowStr '.mat']);
+matFile = fullfile(resultDir, ['scatter3d_data_' nowStr '.mat']);
 save(matFile, 'all_scatterers', 'P_ref', 'center_angles', 'unique_thetas', ...
     'lambda_c', 'B', 'c', 'delta_r', 'aperture_deg', 'modelName', '-v7.3');
 fprintf('  Data: %s\n', matFile);
 
 % 导出文本
-txtFile = fullfile('results', ['scatter3d_centers_' nowStr '.txt']);
+txtFile = fullfile(resultDir, ['scatter3d_centers_' nowStr '.txt']);
 fid = fopen(txtFile, 'w');
 fprintf(fid, '# 3D Scattering Centers Reconstruction\n');
 fprintf(fid, '# Model: %s\n', modelName);

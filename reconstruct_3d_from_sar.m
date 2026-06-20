@@ -36,9 +36,9 @@ addpath('lib');
 
 p = inputParser;
 p.addOptional('DataFile', '', @(x) ischar(x) || isstring(x) || isempty(x));
-p.addParameter('CenterAngles', [30, 60, 90, 120, 150], @(x) isnumeric(x));
+p.addParameter('CenterAngles', 30:15:120, @(x) isnumeric(x));
 p.addParameter('SubAperturesDeg', 10, @(x) isnumeric(x) && isscalar(x));
-p.addParameter('WindowType', 'hamming', @(x) ischar(x) || isstring(x));
+p.addParameter('WindowType', 'kaiser', @(x) ischar(x) || isstring(x));
 p.addParameter('ZeroPadFactor', 2, @(x) isnumeric(x) && isscalar(x));
 p.addParameter('CleanMaxIter', 50, @(x) isnumeric(x) && isscalar(x));
 p.addParameter('CleanThreshold', 0.05, @(x) isnumeric(x) && isscalar(x));
@@ -71,13 +71,10 @@ fprintf('========================================\n\n');
 
 % --- 1a. 加载 wideband_scattering 数据 ---
 if isempty(resultFile)
-    resultDir = fullfile('results');
-    files = dir(fullfile(resultDir, 'wideband_scattering_*.mat'));
-    if isempty(files)
-        error('No wideband_scattering_*.mat found in %s.\nRun main_wideband_scattering first.', resultDir);
+    resultFile = findLatestResultFile('wideband_scattering_*.mat');
+    if isempty(resultFile)
+        error('No wideband_scattering_*.mat found in results/.\nRun main_wideband_scattering first.');
     end
-    [~, idx] = sort([files.datenum], 'descend');
-    resultFile = fullfile(resultDir, files(idx(1)).name);
 end
 
 fprintf('Loading wideband scattering data...\n');
@@ -208,7 +205,10 @@ for i_ang = 1:N_angles
     % --- 2e. 坐标轴标定 ---
     delta_r_pad = delta_r * (N_f / N_r_pad);
     range_axis = (-floor(N_r_pad/2) : ceil(N_r_pad/2)-1) * delta_r_pad;
-    delta_x_pad = delta_x * (N_theta_sub / N_x_pad);
+    % Cross-range 轴: 量程与孔径 Δθ 成比例
+    R_half = max(range_axis);
+    X_half = R_half * tan(delta_theta_rad_actual / 2);
+    delta_x_pad = 2 * X_half / N_x_pad;
     crossrange_axis = (-floor(N_x_pad/2) : ceil(N_x_pad/2)-1) * delta_x_pad;
 
     % --- 2f. PSF 函数 ---
@@ -346,6 +346,7 @@ end
 
 hold off;
 axis equal;
+xlim([-1,1]); ylim([-1,1]); zlim([-1.5,3])
 grid on;
 box on;
 xlabel('X (m)', 'FontSize', 12, 'FontWeight', 'bold');
@@ -357,7 +358,7 @@ title(sprintf(['3D Scattering Centers from SAR Imaging\n', ...
     'FontSize', 13, 'FontWeight', 'bold');
 
 colormap(gca, cmap);
-caxis([min(unique_thetas), max(unique_thetas)]);
+clim([min(unique_thetas), max(unique_thetas)]);
 cb = colorbar;
 cb.Label.String = 'Center Angle θ₀ (deg)';
 cb.Label.FontSize = 11;
@@ -462,26 +463,37 @@ sgtitle(sprintf('Scattering Center Statistics | Model: %s', modelName), ...
 %% ========================================================================
 fprintf('\nSaving results...\n');
 
-nowStr = datestr(now, 'yyyymmddHHMMSS');
+% Create timestamped result directory
+[resultDir, nowStr] = createResultDir('reconstruct_3d_from_sar');
 
-% 保存各图
+% 保存各图 (图1-3: 3D重建图)
 for figNum = 1:3
     if ishandle(figNum)
-        figFile = fullfile('results', sprintf('sar3d_fig%d_%s.png', figNum, nowStr));
+        figFile = fullfile(resultDir, sprintf('sar3d_fig%d_%s.png', figNum, nowStr));
         saveas(figNum, figFile);
         fprintf('  Figure %d: %s\n', figNum, figFile);
     end
 end
+% 保存各角度 SAR 距离-方位图 (figNum = 100 + θ₀)
+for i_ang = 1:N_angles
+    sarFigNum = 100 + center_angles_deg(i_ang);
+    if ishandle(sarFigNum)
+        figFile = fullfile(resultDir, sprintf('sar3d_sar_theta%.0f_%s.png', ...
+            center_angles_deg(i_ang), nowStr));
+        print(sarFigNum, figFile, '-dpng');
+        fprintf('  SAR θ=%.0f°: %s\n', center_angles_deg(i_ang), figFile);
+    end
+end
 
 % 保存 MAT 数据
-matFile = fullfile('results', ['sar3d_data_' nowStr '.mat']);
+matFile = fullfile(resultDir, ['sar3d_data_' nowStr '.mat']);
 save(matFile, 'all_scatterers', 'P_ref', 'center_angles_deg', 'unique_thetas', ...
     'subApertureDeg', 'lambda_c', 'B', 'c', 'delta_r', 'windowType', ...
     'cleanThreshold', 'cleanMaxIter', 'cleanGain', 'modelName', '-v7.3');
 fprintf('  Data: %s\n', matFile);
 
 % 导出文本
-txtFile = fullfile('results', ['sar3d_centers_' nowStr '.txt']);
+txtFile = fullfile(resultDir, ['sar3d_centers_' nowStr '.txt']);
 fid = fopen(txtFile, 'w');
 fprintf(fid, '# 3D Scattering Centers from SAR Imaging\n');
 fprintf(fid, '# Model: %s\n', modelName);
@@ -660,7 +672,9 @@ function plotSingleAngleSAR(I_fft_dB, I_psf_dB, range_axis, crossrange_axis, ...
     N_clean = size(components, 1);
     figNum = 100 + theta0_deg;  % 为每个角度分配唯一图号
 
+    set(0, 'DefaultFigureVisible', 'off');
     figure(figNum);
+    set(0, 'DefaultFigureVisible', 'on');
     clf;
     set(gcf, 'Name', sprintf('SAR Image θ₀=%.0f°', theta0_deg), ...
              'NumberTitle', 'off', 'Position', [200, 100, 900, 450]);

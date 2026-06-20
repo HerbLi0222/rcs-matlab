@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 *)",
+      "Bash(/d/MATLAB/R2025b/bin/matlab *)"
+    ]
+  }
+}

@@ -1,4 +1,4 @@
-function plotName = finalPlot(ip, it, phi, wave, theta, Lmin, Lmax, Sth, Sph, U, V, nowStr, inputModel, mode)
+function plotName = finalPlot(ip, it, phi, wave, theta, Lmin, Lmax, Sth, Sph, U, V, nowStr, inputModel, mode, resultDir)
     % FINALPLOT Generate RCS plots: theta-cut, phi-cut, or contour.
     %
     %   Input:
@@ -11,10 +11,16 @@ function plotName = finalPlot(ip, it, phi, wave, theta, Lmin, Lmax, Sth, Sph, U,
     %       nowStr     - timestamp string
     %       inputModel - model name
     %       mode       - 'Monostatic' or 'Bistatic'
+    %       resultDir  - (optional) result subdirectory path; defaults to 'results'
     %   Output:
     %       plotName - path to saved plot
 
-    fig = figure('Visible', 'off');
+    if nargin < 15 || isempty(resultDir)
+        resultDir = 'results';
+        if ~exist(resultDir, 'dir'), mkdir(resultDir); end
+    end
+
+    fig = figure('Visible', 'on');
 
     if ip == 1
         % Single phi value: plot vs theta
@@ -76,10 +82,6 @@ function plotName = finalPlot(ip, it, phi, wave, theta, Lmin, Lmax, Sth, Sph, U,
     end
 
     % Save plot
-    if ~exist('results', 'dir')
-        mkdir('results');
-    end
-    plotName = fullfile('results', ['temp_' nowStr '.png']);
+    plotName = fullfile(resultDir, ['temp_' nowStr '.png']);
     saveas(fig, plotName);
-    close(fig);
 end

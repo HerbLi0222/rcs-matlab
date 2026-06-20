@@ -1,7 +1,7 @@
 # input model (file in stl_models/)
-compond_fine.stl
+rocket.stl
 # radar frequency (GHz)
-3
+1
 # correlation distance (m)
 0
 # standard deviation (m)
@@ -11,9 +11,9 @@ compond_fine.stl
 # material resistivity (0=PEC, 1=material specific)
 0
 # start phi angle (deg)
-0
+90
 # stop phi angle (deg)
-0
+90
 # phi increment step (deg)
 0
 # start theta angle (deg)
@@ -21,6 +21,6 @@ compond_fine.stl
 # stop theta angle (deg)
 180
 # theta increment step (deg)
-0.5
+0.2
 # matrl file path (or "configure" for material setup)
 matrl.txt

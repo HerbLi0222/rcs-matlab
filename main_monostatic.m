@@ -92,6 +92,13 @@ fprintf('Computing triangle geometry...\n');
 [N, d, Area, beta, alpha] = productVector(ntria, N, r, d, Area, alpha, beta, vind);
 [phi, theta, U, V, W, e0, Sth, Sph] = otherVectorComponents(ip, it);
 
+% Pre-compute model center and triangle centroids for self-shadowing check
+modelCenter = mean(r, 1);
+triCentroids = zeros(ntria, 3);
+for m = 1:ntria
+    triCentroids(m, :) = (r(vind(m, 1), :) + r(vind(m, 2), :) + r(vind(m, 3), :)) / 3;
+end
+
 fprintf('Angular grid: %d phi x %d theta points\n', ip, it);
 
 %% 6. Main RCS computation loop
@@ -128,6 +135,13 @@ for i1 = 1:ip
 
             if iflag == 0
                 if (ilum(m) == 1 && ndotk >= 1e-5) || ilum(m) == 0
+                    % Self-shadowing check: triangles on the back face of the
+                    % model (relative to illumination direction) with marginal
+                    % N·D > 0 may be incorrectly lit due to body curvature.
+                    % Require either: (a) triangle is on the front face, or
+                    % (b) normal is strongly forward-facing.
+                    depthDiff = dot(triCentroids(m, :) - modelCenter, R_vec);
+                    if depthDiff >= 0 || ndotk >= 0.01
                     % Local direction cosines
                     [u2, v2, w2, T1, T2] = directionCosines(alpha, beta, D0, m);
 
@@ -158,6 +172,7 @@ for i1 = 1:ip
                     % Compute scattered fields
                     [sumt, sump, sumdp, sumdt] = calculaCampos(Area, cfac2, corel, th2, wave, ...
                         Jy2, Ic, uu, vv, ww, phr, sumt, sump, sumdt, sumdp, m, Jx2, T1, T2);
+                    end  % self-shadowing check
                 end
             end
         end
@@ -179,24 +194,27 @@ fprintf('RCS computation completed in %.2f seconds.\n', elapsed);
 SthPlot = Sth;
 SphPlot = Sph;
 [Lmax, Lmin] = parametrosGrafico(SthPlot, SphPlot);
-
+Lmax=30; Lmin=-40;
 fprintf('RCS range: %.1f to %.1f dBsm\n', Lmin, Lmax);
 
 %% 8. Generate result files
 fprintf('Generating results...\n');
 
+% Create timestamped result directory
+[resultDir, nowStr] = createResultDir('main_monostatic');
+
 % Triangle model figure
 setFontOption();
-figName = plotTriangleModel(inputModel, vind, x, y, z, xpts, ypts, zpts, nverts, ntria, node1, node2, node3, nfc);
+% figName = plotTriangleModel(inputModel, vind, x, y, z, xpts, ypts, zpts, nverts, ntria, node1, node2, node3, nfc, resultDir);
 
 % Parameter summary
 param = plotParameters('Monostatic', freq, wave, corr, delstd, pol, ntria, pstart, pstop, delp, tstart, tstop, delt);
 
 % Data file
-[nowStr, fileName] = generateResultFiles(theta, Sth, phi, Sph, param, ip);
+[nowStr, fileName] = generateResultFiles(theta, Sth, phi, Sph, param, ip, resultDir);
 
 % RCS plot
-plotName = finalPlot(ip, it, phi, wave, theta, Lmin, Lmax, SthPlot, SphPlot, U, V, nowStr, inputModel, 'Monostatic');
+plotName = finalPlot(ip, it, phi, wave, theta, Lmin, Lmax, SthPlot, SphPlot, U, V, nowStr, inputModel, 'Monostatic', resultDir);
 
 %% 9. Display summary
 fprintf('\n========================================\n');

@@ -3,7 +3,7 @@ function [N, d, Area, beta, alpha] = productVector(ntria, N, r, d, Area, alpha, 
     %
     %   For each triangle, computes:
     %   - Edge vectors A, B, C
-    %   - Outward-facing unit normal N
+    %   - Outward-facing unit normal N (validated against model center)
     %   - Edge lengths d
     %   - Triangle area via Heron's formula
     %   - Elevation angle beta (from z-axis)
@@ -21,6 +21,11 @@ function [N, d, Area, beta, alpha] = productVector(ntria, N, r, d, Area, alpha, 
     %
     %   Output:
     %       Updated arrays with computed values.
+
+    % Compute model geometric center for normal direction validation.
+    % For a closed surface, the outward normal at each triangle should
+    % point AWAY from the model interior.
+    modelCenter = mean(r, 1);
 
     for i = 1:ntria
         % Edge vectors
@@ -44,6 +49,18 @@ function [N, d, Area, beta, alpha] = productVector(ntria, N, r, d, Area, alpha, 
         Nn = norm(N(i, :));
         if Nn ~= 0
             N(i, :) = N(i, :) / Nn;
+        end
+
+        % --- Normal direction validation ---
+        % For a closed surface, the outward normal should point AWAY from
+        % the model interior. Check: N dot (centroid - modelCenter) > 0.
+        % If STL vertex winding is inconsistent, some normals may point
+        % inward. Flip them to ensure correct illumination/shadowing.
+        triCentroid = (r(vind(i, 1), :) + r(vind(i, 2), :) + r(vind(i, 3), :)) / 3;
+        outwardCheck = dot(N(i, :), triCentroid - modelCenter);
+        if outwardCheck < 0
+            % Normal points inward relative to model center — flip it
+            N(i, :) = -N(i, :);
         end
 
         % Orientation angles

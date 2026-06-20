@@ -1,0 +1,29 @@
+========================================
+FFT vs PSF 3D Reconstruction Comparison
+========================================
+Model: simple_missile
+Date:  20260619005722
+
+--- Parameters ---
+Center angles: 30   60   90  120  150 deg
+Sub-aperture: 10.0 deg
+FFT threshold: -40 dB
+CLEAN threshold: 0.050, maxIter: 50, gain: 0.50
+Matching radius: 0.150 m
+Phase correction: P_3d = -r*k_hat - x*k_perp
+
+--- Per-Angle Counts ---
+Theta(deg) N_FFT      N_PSF     
+30.0       11         50        
+60.0       21         50        
+90.0       14         50        
+120.0      28         50        
+150.0      13         50        
+
+--- Summary ---
+FFT total:         87
+PSF total:         250
+Matched pairs:     10
+Mean distance:     0.0460 m
+Median distance:   0.0262 m
+Max distance:      0.1365 m

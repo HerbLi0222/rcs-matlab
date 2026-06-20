@@ -1,11 +1,11 @@
 # input model (file in stl_models/)
-compond.stl
+rocket.stl
 # start radar frequency (GHz)
 2
 # stop radar frequency (GHz)
 8
 # number of frequency points (N_f, should be power of 2 for FFT)
-256
+1024
 # correlation distance (m)
 0
 # standard deviation (m)
@@ -23,8 +23,8 @@ compond.stl
 # start theta angle (deg)
 0
 # stop theta angle (deg)
-180
+360
 # theta increment step (deg)
-1
+0.5
 # matrl file path (or "configure" for material setup)
 matrl.txt

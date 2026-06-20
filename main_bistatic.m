@@ -4,11 +4,14 @@
 %   targets defined by STL triangular mesh models.
 %
 %   In bistatic mode, the transmitter and receiver are at different angular
-%   positions. The incidence direction (thetai, phii) is fixed, and RCS is
-%   computed over a grid of observation angles (theta, phi).
+%   positions. Supports both single and swept incidence angles.
+%
+%   Incidence sweep parameters (in input_data_file_bistatic.txt):
+%     theta incidence start/stop/step  — set step=0 for single incidence
+%     phi incidence start/stop/step    — set step=0 for single incidence
 %
 %   This script:
-%     1. Reads simulation parameters from input_files/input_data_file_bistatic.dat
+%     1. Reads simulation parameters from input_files/input_data_file_bistatic.txt
 %     2. Converts the specified STL model to coordinates and facets
 %     3. Computes bistatic RCS using the Physical Optics method
 %     4. Generates plots and saves results to the results/ directory
@@ -41,9 +44,15 @@ delp = paramList{9};        % deg
 tstart = paramList{10};     % deg (observation theta)
 tstop = paramList{11};      % deg
 delt = paramList{12};       % deg
-thetai = paramList{13};     % deg (incidence theta)
-phii = paramList{14};       % deg (incidence phi)
-matrlpath = paramList{end}; % material file path
+
+% Incidence angle sweep parameters
+thetai_start = paramList{13};  % deg
+thetai_stop  = paramList{14};  % deg
+del_thetai   = paramList{15};  % deg (0 = single incidence)
+phii_start   = paramList{16};  % deg
+phii_stop    = paramList{17};  % deg
+del_phii     = paramList{18};  % deg (0 = single incidence)
+matrlpath = paramList{end};    % material file path
 
 MATERIALESPECIFICO = 1;
 
@@ -90,137 +99,246 @@ Co = 1;  % wave amplitude at all vertices
 fprintf('Frequency: %.2f GHz\n', freq/1e9);
 fprintf('Wavelength: %.6f m\n', wave);
 fprintf('Polarization: %s\n', pol);
-fprintf('Incidence: theta=%.1f deg, phi=%.1f deg\n', thetai, phii);
 fprintf('Triangles: %d\n', ntria);
 
-%% 5. Pre-compute geometry arrays
+%% 5. Pre-compute geometry arrays (observation grid only)
 fprintf('Computing triangle geometry...\n');
-[Area, alpha, beta, N, d, ip, it, cpi, spi, sti, cti, ui, vi, wi, D0i, uui, vvi, wwi, Ri] = ...
-    biCalculateValues(pstart, pstop, delp, tstart, tstop, delt, ntria, rad, phii, thetai);
+[Area, alpha, beta, N, d, ip, it] = calculateValues(pstart, pstop, delp, ...
+    tstart, tstop, delt, ntria, rad);
 
 [N, d, Area, beta, alpha] = productVector(ntria, N, r, d, Area, alpha, beta, vind);
-[phi, theta, U, V, W, e0, Sth, Sph] = otherVectorComponents(ip, it);
 
-% Compute incident field once (fixed incidence direction)
-e0 = biIncidentFieldCartesian(uui, vvi, wwi, cpi, spi, Et, Ep, e0);
+% Pre-compute model center and triangle centroids for self-shadowing check
+modelCenter = mean(r, 1);
+triCentroids = zeros(ntria, 3);
+for m = 1:ntria
+    triCentroids(m, :) = (r(vind(m, 1), :) + r(vind(m, 2), :) + r(vind(m, 3), :)) / 3;
+end
 
-fprintf('Angular grid: %d phi x %d theta observation points\n', ip, it);
+fprintf('Observation grid: %d phi x %d theta points\n', ip, it);
 
-%% 6. Main bistatic RCS computation loop
+%% 6. Build incidence angle sweep arrays
+% Compute number of incidence angles
+if del_thetai == 0
+    ni_theta = 1;
+    thetaIncArray = thetai_start;
+else
+    ni_theta = round((thetai_stop - thetai_start) / del_thetai) + 1;
+    thetaIncArray = linspace(thetai_start, thetai_stop, ni_theta);
+end
+
+if del_phii == 0
+    ni_phi = 1;
+    phiIncArray = phii_start;
+else
+    ni_phi = round((phii_stop - phii_start) / del_phii) + 1;
+    phiIncArray = linspace(phii_start, phii_stop, ni_phi);
+end
+
+ni_total = ni_theta * ni_phi;
+fprintf('Incidence sweep: %d theta x %d phi = %d total incidence angles\n', ...
+        ni_theta, ni_phi, ni_total);
+fprintf('  Theta inc: %.1f ~ %.1f deg, step %.1f deg\n', ...
+        thetai_start, thetai_stop, del_thetai);
+fprintf('  Phi inc:   %.1f ~ %.1f deg, step %.1f deg\n', ...
+        phii_start, phii_stop, del_phii);
+
+%% 7. Pre-allocate result storage
+Sth_all = zeros(ip, it, ni_theta, ni_phi);
+Sph_all = zeros(ip, it, ni_theta, ni_phi);
+thetaObs = zeros(ip, it);
+phiObs   = zeros(ip, it);
+
+%% 8. Main bistatic RCS computation — incidence angle sweep
 fprintf('Computing bistatic RCS...\n');
 tic;
 
-for i1 = 1:ip
-    for i2 = 1:it
-        % Observation angles
-        phi(i1, i2) = pstart + (i1 - 1) * delp;
-        phr = phi(i1, i2) * rad;
-        theta(i1, i2) = tstart + (i2 - 1) * delt;
-        thr = theta(i1, i2) * rad;
+for i_inc_th = 1:ni_theta
+    thetai = thetaIncArray(i_inc_th);
 
-        % Global direction cosines (observation)
-        [U, V, W, D0, uu, vv, ww, u, v, w] = globalAngles(U, V, W, thr, phr, i1, i2);
+    for i_inc_ph = 1:ni_phi
+        phii = phiIncArray(i_inc_ph);
 
-        % Radial unit vector (observation)
-        R_vec = [u; v; w];
+        incIdx = (i_inc_th - 1) * ni_phi + i_inc_ph;
+        fprintf('  [%d/%d] Incidence: theta=%.1f deg, phi=%.1f deg\n', ...
+                incIdx, ni_total, thetai, phii);
 
-        % Accumulators
-        sumt = 0;
-        sump = 0;
-        sumdt = 0;
-        sumdp = 0;
+        % ---- Compute incidence direction cosines ----
+        cpi = cos(phii * rad);  spi = sin(phii * rad);
+        sti = sin(thetai * rad); cti = cos(thetai * rad);
+        ui = sti * cpi;  vi = sti * spi;  wi = cti;
+        D0i = [ui; vi; wi];
+        uui = cti * cpi;  vvi = cti * spi;  wwi = -sti;
+        Ri = [ui; vi; wi];
 
-        % Loop over all triangles
-        for m = 1:ntria
-            % Illumination test (using incidence direction)
-            ndotk = N(m, :) * R_vec;
-            nidotk = N(m, :) * Ri;
+        % Incident field in global Cartesian (fixed for this incidence)
+        e0_inc = zeros(3, 1);
+        e0_inc = biIncidentFieldCartesian(uui, vvi, wwi, cpi, spi, Et, Ep, e0_inc);
 
-            if iflag == 0
-                if ((ilum(m) == 1 && nidotk >= 0) || ilum(m) == 0) || iflag == 1
-                    % Local incidence direction cosines
-                    [ui2, vi2, wi2, T1, T2] = directionCosines(alpha, beta, D0i, m);
+        % Pre-allocate per-incidence arrays
+        [phi, theta, U, V, W, ~, Sth, Sph] = otherVectorComponents(ip, it);
 
-                    % Local spherical angles for incidence
-                    [thi2, phii2, cpi2, spi2, sti2, cti2] = biSphericalAngles(ui2, vi2, wi2);
+        % ---- Observation angle sweep ----
+        for i1 = 1:ip
+            for i2 = 1:it
+                % Observation angles
+                phi(i1, i2) = pstart + (i1 - 1) * delp;
+                phr = phi(i1, i2) * rad;
+                theta(i1, i2) = tstart + (i2 - 1) * delt;
+                thr = theta(i1, i2) * rad;
 
-                    % Local observation direction cosines
-                    [u2, v2, w2, T1, T2] = directionCosines(alpha, beta, D0, m);
+                % Global direction cosines (observation)
+                [U, V, W, D0, uu, vv, ww, u, v, w] = globalAngles(U, V, W, thr, phr, i1, i2);
 
-                    % Local spherical angles for observation
-                    [th2, ~] = sphericalAngles(u2, v2, w2);
+                % Radial unit vector (observation)
+                R_vec = [u; v; w];
 
-                    % Phase at triangle vertices (bistatic: factor bk)
-                    [Dp, Dq, Do] = biPhaseVerticeTriangle(x, y, z, vind, bk, m, u, v, w, ui, vi, wi);
+                % Accumulators
+                sumt = 0;  sump = 0;
+                sumdt = 0; sumdp = 0;
 
-                    % Incident field in local Cartesian coordinates
-                    e1 = T1 * e0;
-                    e2_vec = T2 * e1;
+                % Loop over all triangles
+                for m = 1:ntria
+                    % Illumination test (using incidence direction)
+                    ndotk = N(m, :) * R_vec;
+                    nidotk = N(m, :) * Ri;
 
-                    % Incident field in local spherical coordinates
-                    [Et2, Ep2] = biIncidentFieldSphericalCoordinates(cpi2, cti2, sti2, spi2, e2_vec);
+                    if iflag == 0
+                        if ((ilum(m) == 1 && nidotk >= 0) || ilum(m) == 0) || iflag == 1
+                            % Self-shadowing check using incidence direction Ri
+                            depthDiff = dot(triCentroids(m, :) - modelCenter, Ri);
+                            if depthDiff >= 0 || nidotk >= 0.01
+                            % Local incidence direction cosines
+                            [ui2, vi2, wi2, T1, T2] = directionCosines(alpha, beta, D0i, m);
 
-                    % Reflection coefficients
-                    [perp, para] = reflectionCoefficients(Rs(m), m, th2, thr, phr, alpha(m), beta(m), freq, matrl);
+                            % Local spherical angles for incidence
+                            [thi2, phii2, cpi2, spi2, sti2, cti2] = biSphericalAngles(ui2, vi2, wi2);
 
-                    % Surface current components in local Cartesian
-                    Jx2 = -Et2 * cpi2 * para + Ep2 * spi2 * perp * cti2;
-                    Jy2 = -Et2 * spi2 * para - Ep2 * cpi2 * perp * cti2;
+                            % Local observation direction cosines
+                            [u2, v2, w2, T1, T2] = directionCosines(alpha, beta, D0, m);
 
-                    % Area integral
-                    [DD, expDo, expDp, expDq] = areaIntegral(Dq, Dp, Do);
-                    Ic = calculateIc(Dp, Dq, Do, Nt, Area, expDo, Co, Lt, DD, expDq, m, expDp);
+                            % Local spherical angles for observation
+                            [th2, ~] = sphericalAngles(u2, v2, w2);
 
-                    % Compute scattered fields
-                    [sumt, sump, sumdp, sumdt] = calculaCampos(Area, cfac2, corel, th2, wave, ...
-                        Jy2, Ic, uu, vv, ww, phr, sumt, sump, sumdt, sumdp, m, Jx2, T1, T2);
+                            % Phase at triangle vertices (bistatic: factor bk)
+                            [Dp, Dq, Do] = biPhaseVerticeTriangle(x, y, z, vind, bk, m, u, v, w, ui, vi, wi);
+
+                            % Incident field in local Cartesian coordinates
+                            e1 = T1 * e0_inc;
+                            e2_vec = T2 * e1;
+
+                            % Incident field in local spherical coordinates
+                            [Et2, Ep2] = biIncidentFieldSphericalCoordinates(cpi2, cti2, sti2, spi2, e2_vec);
+
+                            % Reflection coefficients (using OBSERVATION th2 for monostatic-like convention)
+                            [perp, para] = reflectionCoefficients(Rs(m), m, th2, thr, phr, alpha(m), beta(m), freq, matrl);
+
+                            % Surface current components in local Cartesian
+                            Jx2 = -Et2 * cpi2 * para + Ep2 * spi2 * perp * cti2;
+                            Jy2 = -Et2 * spi2 * para - Ep2 * cpi2 * perp * cti2;
+
+                            % Area integral
+                            [DD, expDo, expDp, expDq] = areaIntegral(Dq, Dp, Do);
+                            Ic = calculateIc(Dp, Dq, Do, Nt, Area, expDo, Co, Lt, DD, expDq, m, expDp);
+
+                            % Compute scattered fields
+                            [sumt, sump, sumdp, sumdt] = calculaCampos(Area, cfac2, corel, th2, wave, ...
+                                Jy2, Ic, uu, vv, ww, phr, sumt, sump, sumdt, sumdp, m, Jx2, T1, T2);
+                            end  % self-shadowing check
+                        end
+                    end
                 end
+
+                % Compute RCS for this angular position
+                [Sth, Sph] = calculateSthSph(cfac1, sumt, sump, sumdt, wave, Sth, Sph, i1, i2, sumdp);
+            end
+
+            % Progress indicator
+            if mod(i1, max(1, floor(ip/10))) == 0
+                fprintf('    Obs progress: %d/%d phi angles (%.1f%%)\n', i1, ip, 100*i1/ip);
             end
         end
 
-        % Compute RCS for this angular position
-        [Sth, Sph] = calculateSthSph(cfac1, sumt, sump, sumdt, wave, Sth, Sph, i1, i2, sumdp);
-    end
-
-    % Progress indicator
-    if mod(i1, max(1, floor(ip/10))) == 0
-        fprintf('  Progress: %d/%d phi angles (%.1f%%)\n', i1, ip, 100*i1/ip);
+        % Store results for this incidence angle
+        Sth_all(:, :, i_inc_th, i_inc_ph) = Sth;
+        Sph_all(:, :, i_inc_th, i_inc_ph) = Sph;
+        if incIdx == 1
+            thetaObs = theta;
+            phiObs = phi;
+        end
     end
 end
 
 elapsed = toc;
 fprintf('Bistatic RCS computation completed in %.2f seconds.\n', elapsed);
 
-%% 7. Compute axis limits and generate outputs
-SthPlot = Sth;
-SphPlot = Sph;
-[Lmax, Lmin] = parametrosGrafico(SthPlot, SphPlot);
-
-fprintf('RCS range: %.1f to %.1f dBsm\n', Lmin, Lmax);
-
-%% 8. Generate result files
+%% 9. Generate result files
 fprintf('Generating results...\n');
+
+% Create timestamped result directory
+[resultDir, nowStr] = createResultDir('main_bistatic');
 
 % Triangle model figure
 setFontOption();
-figName = plotTriangleModel(inputModel, vind, x, y, z, xpts, ypts, zpts, nverts, ntria, node1, node2, node3, nfc);
+figName = plotTriangleModel(inputModel, vind, x, y, z, xpts, ypts, zpts, ...
+    nverts, ntria, node1, node2, node3, nfc, resultDir);
 
 % Parameter summary
-param = plotParameters('Bistatic', freq, wave, corr, delstd, pol, ntria, pstart, pstop, delp, tstart, tstop, delt);
+param = plotParameters('Bistatic', freq, wave, corr, delstd, pol, ntria, ...
+    pstart, pstop, delp, tstart, tstop, delt);
 
-% Data file
-[nowStr, fileName] = generateResultFiles(theta, Sth, phi, Sph, param, ip);
+%% Save combined .mat file with all incidence data
+matFileName = fullfile(resultDir, ['bistatic_data_' nowStr '.mat']);
+save(matFileName, 'thetaObs', 'phiObs', 'thetaIncArray', 'phiIncArray', ...
+     'Sth_all', 'Sph_all', 'freq', 'wave', 'pol', 'inputModel', ...
+     'thetai_start', 'thetai_stop', 'del_thetai', ...
+     'phii_start', 'phii_stop', 'del_phii', ...
+     'pstart', 'pstop', 'delp', 'tstart', 'tstop', 'delt', ...
+     'ni_theta', 'ni_phi', 'ip', 'it', 'param', '-v7.3');
+fprintf('  Combined data saved: %s\n', matFileName);
 
-% RCS plot
-plotName = finalPlot(ip, it, phi, wave, theta, Lmin, Lmax, SthPlot, SphPlot, U, V, nowStr, inputModel, 'Bistatic');
+%% Save individual .dat files per incidence angle (backward compatible)
+for i_inc_th = 1:ni_theta
+    thetai = thetaIncArray(i_inc_th);
+    for i_inc_ph = 1:ni_phi
+        phii = phiIncArray(i_inc_ph);
 
-%% 9. Display summary
+        % Build per-incidence param string
+        paramInc = sprintf(['%s' ...
+            '    Incidence theta (deg): %.1f\n' ...
+            '    Incidence phi (deg): %.1f\n'], ...
+            param, thetai, phii);
+
+        Sth = squeeze(Sth_all(:, :, i_inc_th, i_inc_ph));
+        Sph = squeeze(Sph_all(:, :, i_inc_th, i_inc_ph));
+
+        % Generate filename with incidence info
+        incStr = sprintf('_incTH%.0f_PH%.0f', thetai, phii);
+        [~, datFileName] = generateResultFiles(thetaObs, Sth, phiObs, Sph, paramInc, ip, resultDir);
+        % Rename to include incidence info
+        [dDir, dFile, dExt] = fileparts(datFileName);
+        newDatName = fullfile(dDir, [dFile incStr dExt]);
+        movefile(datFileName, newDatName);
+    end
+end
+
+%% Generate RCS plot for first incidence angle
+SthPlot = squeeze(Sth_all(:, :, 1, 1));
+SphPlot = squeeze(Sph_all(:, :, 1, 1));
+[Lmax, Lmin] = parametrosGrafico(SthPlot, SphPlot);
+Lmax = 30; Lmin = -40;
+
+plotName = finalPlot(ip, it, phiObs, wave, thetaObs, Lmin, Lmax, ...
+    SthPlot, SphPlot, U, V, nowStr, inputModel, 'Bistatic', resultDir);
+
+%% 10. Display summary
 fprintf('\n========================================\n');
 fprintf('  Bistatic Simulation Complete\n');
 fprintf('========================================\n');
-fprintf('  Model:      %s\n', inputModel);
-fprintf('  Incidence:  theta=%.1f deg, phi=%.1f deg\n', thetai, phii);
-fprintf('  Plot:       %s\n', plotName);
-fprintf('  Figure:     %s\n', figName);
-fprintf('  Data:       %s\n', fileName);
+fprintf('  Model:         %s\n', inputModel);
+fprintf('  Obs grid:      %d phi x %d theta\n', ip, it);
+fprintf('  Inc sweep:     %d theta x %d phi = %d angles\n', ni_theta, ni_phi, ni_total);
+fprintf('  Combined .mat: %s\n', matFileName);
+fprintf('  Plot:          %s\n', plotName);
+fprintf('  Figure:        %s\n', figName);
 fprintf('========================================\n');

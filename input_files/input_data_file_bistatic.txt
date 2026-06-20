@@ -1,7 +1,7 @@
 # input model (file in stl_models/)
-compond.stl
+rocket.stl
 # radar frequency (GHz)
-3
+1
 # correlation distance (m)
 0
 # standard deviation (m)
@@ -10,21 +10,29 @@ compond.stl
 0
 # material resistivity (0=PEC, 1=material specific)
 0
-# start phi angle (deg)
+# start phi angle (deg) — observation
 0
-# stop phi angle (deg)
-360
-# phi increment step (deg)
-2
-# start theta angle (deg)
+# stop phi angle (deg) — observation
 0
-# stop theta angle (deg)
+# phi increment step (deg) — observation
+0
+# start theta angle (deg) — observation
+0
+# stop theta angle (deg) — observation
 180
-# theta increment step (deg)
+# theta increment step (deg) — observation
 1
-# theta incidence (deg)
-90
-# phi incidence (deg)
+# theta incidence start (deg)
+0
+# theta incidence stop (deg)
+180
+# theta incidence step (deg) — set to 0 for single incidence
+1
+# phi incidence start (deg)
+0
+# phi incidence stop (deg)
+0
+# phi incidence step (deg) — set to 0 for single incidence
 0
 # matrl file path (or "configure" for material setup)
 matrl.txt

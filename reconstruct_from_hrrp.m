@@ -65,13 +65,10 @@ fprintf('========================================\n\n');
 
 % --- 1a. 加载 range_profile_data ---
 if isempty(dataFile)
-    resultDir = fullfile('results');
-    files = dir(fullfile(resultDir, 'range_profile_data_*.mat'));
-    if isempty(files)
-        error('No range_profile_data_*.mat found in %s.\nRun main_range_profile first.', resultDir);
+    dataFile = findLatestResultFile('range_profile_data_*.mat');
+    if isempty(dataFile)
+        error('No range_profile_data_*.mat found in results/.\nRun main_range_profile first.');
     end
-    [~, idx] = sort([files.datenum], 'descend');
-    dataFile = fullfile(resultDir, files(idx(1)).name);
 end
 
 fprintf('Loading range profile data...\n');
@@ -95,10 +92,9 @@ fprintf('  Angle span: %.1f ~ %.1f deg\n', angle_axis(1), angle_axis(end));
 % --- 1b. 确定相位参考点 ---
 % 尝试从 wideband_scattering 数据获取 bbox_center
 P_ref = [0; 0; 0];
-widebandFiles = dir(fullfile('results', 'wideband_scattering_*.mat'));
-if ~isempty(widebandFiles)
-    [~, sortIdx] = sort([widebandFiles.datenum], 'descend');
-    wbData = load(fullfile('results', widebandFiles(sortIdx(1)).name));
+wbFile = findLatestResultFile('wideband_scattering_*.mat');
+if ~isempty(wbFile)
+    wbData = load(wbFile);
     if isfield(wbData, 'bbox_center')
         P_ref = wbData.bbox_center(:);
         modelName = '';
@@ -504,23 +500,24 @@ end
 %% ========================================================================
 fprintf('\nSaving results...\n');
 
-nowStr = datestr(now, 'yyyymmddHHMMSS');
+% Create timestamped result directory
+[resultDir, nowStr] = createResultDir('reconstruct_from_hrrp');
 
 for figNum = 1:3
     if ishandle(figNum)
-        figFile = fullfile('results', sprintf('hrrp3d_fig%d_%s.png', figNum, nowStr));
+        figFile = fullfile(resultDir, sprintf('hrrp3d_fig%d_%s.png', figNum, nowStr));
         saveas(figNum, figFile);
         fprintf('  Figure %d: %s\n', figNum, figFile);
     end
 end
 
-matFile = fullfile('results', ['hrrp3d_data_' nowStr '.mat']);
+matFile = fullfile(resultDir, ['hrrp3d_data_' nowStr '.mat']);
 save(matFile, 'scatterer_list', 'P_ref', 'all_peaks', 'candidates_3d', ...
     'clusters', 'peakThreshold', 'clusterRadius', 'minClusterSize', ...
     'angle_axis', 'range_axis', 'modelName', '-v7.3');
 fprintf('  Data: %s\n', matFile);
 
-txtFile = fullfile('results', ['hrrp3d_centers_' nowStr '.txt']);
+txtFile = fullfile(resultDir, ['hrrp3d_centers_' nowStr '.txt']);
 fid = fopen(txtFile, 'w');
 fprintf(fid, '# HRRP-Based 3D Scattering Centers\n');
 fprintf(fid, '# Model: %s\n', modelName);

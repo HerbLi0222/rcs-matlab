@@ -35,14 +35,11 @@ else
 end
 
 if isempty(resultFile)
-    resultDir = fullfile('results');
-    files = dir(fullfile(resultDir, 'wideband_scattering_*.mat'));
-    if isempty(files)
+    resultFile = findLatestResultFile('wideband_scattering_*.mat');
+    if isempty(resultFile)
         error('main_range_profile:NoDataFile', ...
-              'No wideband_scattering_*.mat found in %s.\nRun main_wideband_scattering first.', resultDir);
+              'No wideband_scattering_*.mat found in results/.\nRun main_wideband_scattering first.');
     end
-    [~, idx] = sort([files.datenum], 'descend');
-    resultFile = fullfile(resultDir, files(idx(1)).name);
     fprintf('Auto-selected: %s\n', resultFile);
 end
 
@@ -451,25 +448,26 @@ set(gca, 'FontSize', 11);
 %% ========================================================================
 fprintf('\nSaving results...\n');
 
-nowStr = datestr(now, 'yyyymmddHHMMSS');
+% Create timestamped result directory
+[resultDir, nowStr] = createResultDir('main_range_profile');
 
 % ---- 9a. 保存各图为 PNG + FIG ----
-figFile1 = fullfile('results', ['hrrp_map_' nowStr '.png']);
+figFile1 = fullfile(resultDir, ['hrrp_map_' nowStr '.png']);
 saveas(1, figFile1);
 fprintf('  Figure 1 (HRRP map):    %s\n', figFile1);
 
-figFile2 = fullfile('results', ['scattering_spectrum_' nowStr '.png']);
+figFile2 = fullfile(resultDir, ['scattering_spectrum_' nowStr '.png']);
 saveas(2, figFile2);
 fprintf('  Figure 2 (spectrum):    %s\n', figFile2);
 
-figFile3 = fullfile('results', ['range_profile_single_' nowStr '.png']);
+figFile3 = fullfile(resultDir, ['range_profile_single_' nowStr '.png']);
 saveas(3, figFile3);
 fprintf('  Figure 3 (1D profile):  %s\n', figFile3);
 
-saveas(1, fullfile('results', ['hrrp_map_' nowStr '.fig']));
+saveas(1, fullfile(resultDir, ['hrrp_map_' nowStr '.fig']));
 
 % ---- 9b. 保存历程图数据 (.mat) ----
-dataFile = fullfile('results', ['range_profile_data_' nowStr '.mat']);
+dataFile = fullfile(resultDir, ['range_profile_data_' nowStr '.mat']);
 save(dataFile, 'M_dB', 'M_display', 'range_axis', 'angle_axis', ...
     'delta_r_fft', 'N_fft', 'N_angles_total', 'windowType', ...
     'dyn_range_min', 'dyn_range_max', 'zero_pad_factor', ...
@@ -477,7 +475,7 @@ save(dataFile, 'M_dB', 'M_display', 'range_axis', 'angle_axis', ...
 fprintf('  Data (.mat):            %s\n', dataFile);
 
 % ---- 9c. 导出文本格式的历程图数据 (.dat) ----
-txtFile = fullfile('results', ['range_profile_data_' nowStr '.dat']);
+txtFile = fullfile(resultDir, ['range_profile_data_' nowStr '.dat']);
 fid = fopen(txtFile, 'w');
 fprintf(fid, '# Range Profile Map Data (HRRP 一维距离历程图数据)\n');
 fprintf(fid, '# Generated: %s\n', nowStr);

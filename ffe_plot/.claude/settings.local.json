@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/d/MATLAB/R2025b/bin/matlab -batch \"addpath\\(genpath\\(pwd\\)\\); ffe_plot_monostatic\\({'ffe_file/result.ffe', 'ffe_file/result_rocket.ffe', 'ffe_file/result_rocket_lpo.ffe', 'ffe_file/result_rocket_po.ffe'}, struct\\('saveFigs',true,'saveDir','ffe_file/monostatic_export'\\)\\)\")",
+      "Bash(grep -v \"^$\")"
+    ]
+  }
+}

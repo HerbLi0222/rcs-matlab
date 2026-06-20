@@ -1,4 +1,4 @@
-function figName = plotTriangleModel(inputModel, vind, x, y, z, xpts, ypts, zpts, nverts, ntria, node1, node2, node3, nfc)
+function figName = plotTriangleModel(inputModel, vind, x, y, z, xpts, ypts, zpts, nverts, ntria, node1, node2, node3, nfc, resultDir)
     % PLOTTRIANGLEMODEL Plot 3D wireframe of the triangular mesh model.
     %
     %   Input:
@@ -10,10 +10,16 @@ function figName = plotTriangleModel(inputModel, vind, x, y, z, xpts, ypts, zpts
     %       ntria      - number of triangles
     %       node1, node2, node3 - facet node indices
     %       nfc        - facet numbers
+    %       resultDir  - (optional) result subdirectory path; defaults to 'results'
     %   Output:
     %       figName - path to saved figure
 
-    fig = figure('Visible', 'off');
+    if nargin < 15 || isempty(resultDir)
+        resultDir = 'results';
+        if ~exist(resultDir, 'dir'), mkdir(resultDir); end
+    end
+
+    fig = figure('Visible', 'on');
     ax = axes('Parent', fig);
 
     hold(ax, 'on');
@@ -51,13 +57,8 @@ function figName = plotTriangleModel(inputModel, vind, x, y, z, xpts, ypts, zpts
     grid(ax, 'on');
 
     % Save figure
-    if ~exist('results', 'dir')
-        mkdir('results');
-    end
-
     nowStr = datestr(now, 'yyyymmddHHMMSS');
-    figName = fullfile('results', ['temp_' nowStr '.jpg']);
+    figName = fullfile(resultDir, ['temp_' nowStr '.jpg']);
 
     saveas(fig, figName);
-    close(fig);
 end

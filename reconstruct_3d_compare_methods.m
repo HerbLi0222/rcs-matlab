@@ -26,16 +26,16 @@ addpath('lib');
 
 p = inputParser;
 p.addOptional('DataFile', '', @(x) ischar(x) || isstring(x) || isempty(x));
-p.addParameter('CenterAngles', [30, 60, 90, 120, 150], @(x) isnumeric(x));
+p.addParameter('CenterAngles', 30:15:120, @(x) isnumeric(x));
 p.addParameter('SubApertureDeg', 10, @(x) isnumeric(x) && isscalar(x));
 p.addParameter('WindowType', 'hamming', @(x) ischar(x) || isstring(x));
 p.addParameter('ZeroPadFactor', 2, @(x) isnumeric(x) && isscalar(x));
 p.addParameter('CleanMaxIter', 50, @(x) isnumeric(x) && isscalar(x));
 p.addParameter('CleanThreshold', 0.05, @(x) isnumeric(x) && isscalar(x));
 p.addParameter('CleanGain', 0.5, @(x) isnumeric(x) && isscalar(x));
-p.addParameter('FftThreshold', -6, @(x) isnumeric(x) && isscalar(x));    % dB 阈值
-p.addParameter('FftMinSep', 0.02, @(x) isnumeric(x) && isscalar(x));     % 最小峰间距 (m)
-p.addParameter('FftMaxPeaks', 60, @(x) isnumeric(x) && isscalar(x));     % 每角度最大峰数
+p.addParameter('FftThreshold', -45, @(x) isnumeric(x) && isscalar(x));   % dB 阈值（对齐 CLEAN ~ -26dB）
+p.addParameter('FftMinSep', 0.04, @(x) isnumeric(x) && isscalar(x));     % 最小峰间距 (m)，加宽抑制旁瓣
+p.addParameter('FftMaxPeaks', 100, @(x) isnumeric(x) && isscalar(x));    % 每角度最大峰数
 p.addParameter('MatchingRadius', 0.15, @(x) isnumeric(x) && isscalar(x)); % 匹配半径 (m)
 
 if ~isempty(varargin) && (ischar(varargin{1}) || isstring(varargin{1})) ...
@@ -70,13 +70,10 @@ fprintf('========================================\n\n');
 
 % --- 1a. 加载 wideband_scattering 数据 ---
 if isempty(resultFile)
-    resultDir = fullfile('results');
-    files = dir(fullfile(resultDir, 'wideband_scattering_*.mat'));
-    if isempty(files)
+    resultFile = findLatestResultFile('wideband_scattering_*.mat');
+    if isempty(resultFile)
         error('No wideband_scattering_*.mat found. Run main_wideband_scattering first.');
     end
-    [~, idx] = sort([files.datenum], 'descend');
-    resultFile = fullfile(resultDir, files(idx(1)).name);
 end
 
 fprintf('Loading: %s\n', resultFile);
@@ -197,7 +194,10 @@ for i_ang = 1:N_angles
     % --- 2e. 坐标轴 ---
     delta_r_pad = delta_r * (N_f / N_r_pad);
     range_axis = (-floor(N_r_pad/2) : ceil(N_r_pad/2)-1) * delta_r_pad;
-    delta_x_pad = delta_x * (N_theta_sub / N_x_pad);
+    % Cross-range 轴: 量程与孔径 Δθ 成比例
+    R_half = max(range_axis);
+    X_half = R_half * tan(delta_theta_rad_actual / 2);
+    delta_x_pad = 2 * X_half / N_x_pad;
     crossrange_axis = (-floor(N_x_pad/2) : ceil(N_x_pad/2)-1) * delta_x_pad;
 
     % --- 2f. PSF 函数 ---
@@ -350,6 +350,7 @@ end
 scatter3(P_ref(1), P_ref(2), P_ref(3), 120, 'k', 'p', 'filled');
 hold off;
 axis equal; grid on; box on;
+xlim([-1.5 1.5]); ylim([-1.5, 1.5]); zlim([-2, 2])
 xlabel('X (m)'); ylabel('Y (m)'); zlabel('Z (m)');
 title(sprintf('Method 1: FFT + Peak Detection\n(%d centers)', size(all_fft,1)), ...
     'FontSize', 12, 'FontWeight', 'bold');
@@ -374,6 +375,7 @@ end
 scatter3(P_ref(1), P_ref(2), P_ref(3), 120, 'k', 'p', 'filled');
 hold off;
 axis equal; grid on; box on;
+xlim([-1.5 1.5]); ylim([-1.5, 1.5]); zlim([-2, 2])
 xlabel('X (m)'); ylabel('Y (m)'); zlabel('Z (m)');
 title(sprintf('Method 2: CLEAN + PSF\n(%d centers)', size(all_psf,1)), ...
     'FontSize', 12, 'FontWeight', 'bold');
@@ -412,6 +414,7 @@ end
 scatter3(P_ref(1), P_ref(2), P_ref(3), 120, 'k', 'p', 'filled');
 hold off;
 axis equal; grid on; box on;
+xlim([-1.5 1.5]); ylim([-1.5, 1.5]); zlim([-2, 2])
 xlabel('X (m)'); ylabel('Y (m)'); zlabel('Z (m)');
 title(sprintf('Overlay: FFT (o) vs PSF (+)\n%d matched pairs', size(matched_pairs,1)), ...
     'FontSize', 12, 'FontWeight', 'bold');
@@ -423,7 +426,9 @@ sgtitle(sprintf('FFT vs PSF 3D Reconstruction | Model: %s', modelName), ...
        'FontSize', 14, 'FontWeight', 'bold');
 
 %% --- 图2: 单角度 SAR 图像对比（选中间角度作为示例）---
+set(0, 'DefaultFigureVisible', 'off');
 figure(2);
+set(0, 'DefaultFigureVisible', 'on');
 clf;
 set(gcf, 'Name', 'Per-Angle SAR Image Comparison', ...
          'NumberTitle', 'off', 'Position', [50, 80, 1300, 450]);
@@ -679,17 +684,18 @@ sgtitle(sprintf('Three-View Comparison: FFT (left) vs PSF (right) | Model: %s', 
 %% ========================================================================
 fprintf('\nSaving results...\n');
 
-nowStr = datestr(now, 'yyyymmddHHMMSS');
+% Create timestamped result directory
+[resultDir, nowStr] = createResultDir('reconstruct_3d_compare_methods');
 
 for figNum = 1:4
     if ishandle(figNum)
-        figFile = fullfile('results', sprintf('compare3d_fig%d_%s.png', figNum, nowStr));
-        saveas(figNum, figFile);
+        figFile = fullfile(resultDir, sprintf('compare3d_fig%d_%s.png', figNum, nowStr));
+        print(figNum, figFile, '-dpng');
         fprintf('  Figure %d: %s\n', figNum, figFile);
     end
 end
 
-matFile = fullfile('results', ['compare3d_data_' nowStr '.mat']);
+matFile = fullfile(resultDir, ['compare3d_data_' nowStr '.mat']);
 save(matFile, 'all_fft', 'all_psf', 'matched_pairs', 'dist_stats', ...
     'per_angle_stats', 'center_angles_deg', 'subApertureDeg', ...
     'fftThreshold', 'cleanThreshold', 'matchingRadius', ...
@@ -697,7 +703,7 @@ save(matFile, 'all_fft', 'all_psf', 'matched_pairs', 'dist_stats', ...
 fprintf('  Data: %s\n', matFile);
 
 % 文本报告
-rptFile = fullfile('results', ['compare3d_report_' nowStr '.txt']);
+rptFile = fullfile(resultDir, ['compare3d_report_' nowStr '.txt']);
 fid = fopen(rptFile, 'w');
 fprintf(fid, '========================================\n');
 fprintf(fid, 'FFT vs PSF 3D Reconstruction Comparison\n');

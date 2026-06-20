@@ -187,6 +187,11 @@ tic;
 % 角度编号（扁平化索引）
 i_angle = 0;
 
+% 进度显示控制
+progress_interval = max(1, floor(N_angles_total / 20));
+next_progress     = progress_interval;
+start_time        = tic;
+
 for i1 = 1:ip      % ---- phi 角循环 ----
     for i2 = 1:it  % ---- theta 角循环 ----
 
@@ -209,6 +214,17 @@ for i1 = 1:ip      % ---- phi 角循环 ----
 
         phr = phi_val * rad;
         thr = theta_val * rad;
+
+        % ----- 进度显示（约 5% 步进）-----
+        if i_angle >= next_progress || i_angle == 1 || i_angle == N_angles_total
+            elapsed  = toc(start_time);
+            pct      = 100 * i_angle / N_angles_total;
+            rate     = i_angle / elapsed;
+            eta      = (N_angles_total - i_angle) / max(rate, 1e-6);
+            fprintf('  [%3.0f%%] angle %d/%d  theta=%.1f  phi=%.1f  |  elapsed: %.1fs  ETA: %.1fs\n', ...
+                pct, i_angle, N_angles_total, theta_val, phi_val, elapsed, eta);
+            next_progress = next_progress + progress_interval;
+        end
 
         % ----- 全局方向余弦（与频率无关）-----
         % globalAngles 需要数组输入进行索引赋值，创建局部哑数组
@@ -296,15 +312,9 @@ for i1 = 1:ip      % ---- phi 角循环 ----
 
     end  % ---- theta 循环结束 ----
 
-    % 进度显示
-    if mod(i1, max(1, floor(ip/10))) == 0 || ip == 1
-        fprintf('  Progress: angle %d/%d (%.1f%%), elapsed: %.1f s\n', ...
-            i_angle, N_angles_total, 100*i_angle/N_angles_total, toc);
-    end
-
 end  % ---- phi 循环结束 ----
 
-elapsed = toc;
+elapsed = toc(start_time);
 fprintf('\nWideband scattering computation completed in %.2f seconds (%.1f min).\n', ...
     elapsed, elapsed/60);
 fprintf('  Average: %.3f s per angle\n', elapsed / N_angles_total);
@@ -312,9 +322,9 @@ fprintf('  Average: %.3f s per angle\n', elapsed / N_angles_total);
 %% 7. 保存结果
 fprintf('\nSaving results...\n');
 
-% 生成时间戳和文件名
-nowStr = datestr(now, 'yyyymmddHHMMSS');
-resultFile = fullfile('results', ['wideband_scattering_' nowStr '.mat']);
+% Create timestamped result directory
+[resultDir, nowStr] = createResultDir('main_wideband_scattering');
+resultFile = fullfile(resultDir, ['wideband_scattering_' nowStr '.mat']);
 
 % 构建参数摘要字符串
 param = sprintf(['Wideband Scattering Simulation\n', ...

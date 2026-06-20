@@ -70,14 +70,11 @@ fprintf('========================================\n\n');
 
 % 自动查找最新 wideband_scattering 文件
 if isempty(resultFile)
-    resultDir = fullfile('results');
-    files = dir(fullfile(resultDir, 'wideband_scattering_*.mat'));
-    if isempty(files)
+    resultFile = findLatestResultFile('wideband_scattering_*.mat');
+    if isempty(resultFile)
         error('main_sar_imaging:NoDataFile', ...
-              'No wideband_scattering_*.mat found in %s.\nRun main_wideband_scattering first.', resultDir);
+              'No wideband_scattering_*.mat found in results/.\nRun main_wideband_scattering first.');
     end
-    [~, idx] = sort([files.datenum], 'descend');
-    resultFile = fullfile(resultDir, files(idx(1)).name);
 end
 
 fprintf('Loading wideband scattering data...\n');
@@ -335,32 +332,49 @@ if N_valid < 2
     warning('  Need at least 2 valid apertures for comparison.');
 end
 
-% 计算相似度指标
+% 计算对比指标 + 逐方法指标
 metrics = struct();
 for i = 1:N_valid
     idx = valid_idx(i);
 
-    % 相关系数 (CC)
-    cc_val = computeCorrelationCoefficient(...
-        results_fft{idx}.mag, results_psf{idx}.mag);
-
-    % 结构相似度 (SSIM)
+    % --- 对比指标 ---
+    cc_val   = computeCorrelationCoefficient(results_fft{idx}.mag, results_psf{idx}.mag);
     ssim_val = computeSSIM(results_fft{idx}.dB, results_psf{idx}.dB);
 
-    % 展宽宽度 (-3dB 主瓣宽度，方位向)
-    beamwidth_fft = measureBeamwidth(results_fft{idx}.dB);
-    beamwidth_psf = measureBeamwidth(results_psf{idx}.dB);
+    % --- 逐方法: 展宽宽度 ---
+    bw_fft = measureBeamwidth(results_fft{idx}.dB);
+    bw_psf = measureBeamwidth(results_psf{idx}.dB);
 
-    metrics(i).cc = cc_val;
-    metrics(i).ssim = ssim_val;
-    metrics(i).bw_fft = beamwidth_fft;
-    metrics(i).bw_psf = beamwidth_psf;
+    % --- 逐方法: 散射点数（FFT: -20dB 以上像素; PSF: CLEAN 中心数）---
+    n_fft = sum(results_fft{idx}.dB(:) > -20);
+    n_psf = size(results_clean{idx}, 1);
+
+    % --- 逐方法: 平均幅度 ---
+    mask_fft = results_fft{idx}.dB > -20;
+    if any(mask_fft)
+        mean_amp_fft = mean(results_fft{idx}.mag(mask_fft));
+    else
+        mean_amp_fft = 0;
+    end
+    if ~isempty(results_clean{idx})
+        mean_amp_psf = mean(results_clean{idx}(:, 3));
+    else
+        mean_amp_psf = 0;
+    end
+
+    metrics(i).cc       = cc_val;
+    metrics(i).ssim     = ssim_val;
+    metrics(i).bw_fft   = bw_fft;
+    metrics(i).bw_psf   = bw_psf;
+    metrics(i).n_fft    = n_fft;
+    metrics(i).n_psf    = n_psf;
+    metrics(i).amp_fft  = mean_amp_fft;
+    metrics(i).amp_psf  = mean_amp_psf;
     metrics(i).delta_theta = aperture_info{idx}.delta_theta_deg;
-    metrics(i).delta_x = aperture_info{idx}.delta_x;
+    metrics(i).delta_x     = aperture_info{idx}.delta_x;
 
-    fprintf('  Δθ=%.1f°: CC=%.4f, SSIM=%.4f, BW_FFT=%.2f bins, BW_PSF=%.2f bins\n', ...
-        metrics(i).delta_theta, metrics(i).cc, metrics(i).ssim, ...
-        metrics(i).bw_fft, metrics(i).bw_psf);
+    fprintf('  Δθ=%.1f°: CC=%.3f SSIM=%.3f | BW FFT=%.1f/PSF=%.1f | N FFT=%d/PSF=%d | Amp FFT=%.2e/PSF=%.2e\n', ...
+        metrics(i).delta_theta, cc_val, ssim_val, bw_fft, bw_psf, n_fft, n_psf, mean_amp_fft, mean_amp_psf);
 end
 
 %% ========================================================================
@@ -513,7 +527,7 @@ if N_valid >= 1
 
     delta_theta_vals = [metrics.delta_theta];
 
-    % CC 曲线
+    % 相关系数对比
     subplot(2, 2, 1);
     plot(delta_theta_vals, [metrics.cc], 'bo-', 'LineWidth', 2, 'MarkerSize', 8);
     xlabel('Angular Aperture Δθ (deg)');
@@ -523,15 +537,18 @@ if N_valid >= 1
     xlim([min(delta_theta_vals)*0.8, max(delta_theta_vals)*1.2]);
     ylim([0, 1]);
 
-    % SSIM 曲线
+    % 平均幅度对比 (FFT vs PSF)
     subplot(2, 2, 2);
-    plot(delta_theta_vals, [metrics.ssim], 'ro-', 'LineWidth', 2, 'MarkerSize', 8);
+    plot(delta_theta_vals, [metrics.amp_fft], 'bs-', 'LineWidth', 1.5, 'MarkerSize', 8);
+    hold on;
+    plot(delta_theta_vals, [metrics.amp_psf], 'r^-', 'LineWidth', 1.5, 'MarkerSize', 8);
+    hold off;
     xlabel('Angular Aperture Δθ (deg)');
-    ylabel('SSIM');
-    title('SSIM: FFT vs PSF');
+    ylabel('Mean Amplitude');
+    title('Mean Amplitude: FFT vs PSF');
+    legend('FFT', 'PSF (CLEAN)', 'Location', 'best');
     grid on;
     xlim([min(delta_theta_vals)*0.8, max(delta_theta_vals)*1.2]);
-    ylim([0, 1]);
 
     % 展宽宽度对比
     subplot(2, 2, 3);
@@ -605,19 +622,20 @@ end
 %% ========================================================================
 fprintf('\nSaving results...\n');
 
-nowStr = datestr(now, 'yyyymmddHHMMSS');
+% Create timestamped result directory
+[resultDir, nowStr] = createResultDir('main_sar_imaging');
 
 % 保存各图
 for figNum = 1:5
     if ishandle(figNum)
-        figFile = fullfile('results', sprintf('sar_fig%d_%s.png', figNum, nowStr));
+        figFile = fullfile(resultDir, sprintf('sar_fig%d_%s.png', figNum, nowStr));
         saveas(figNum, figFile);
         fprintf('  Figure %d: %s\n', figNum, figFile);
     end
 end
 
 % 保存 MAT 数据
-sarDataFile = fullfile('results', ['sar_imaging_' nowStr '.mat']);
+sarDataFile = fullfile(resultDir, ['sar_imaging_' nowStr '.mat']);
 save(sarDataFile, 'results_fft', 'results_psf', 'results_clean', ...
     'aperture_info', 'metrics', 'valid_idx', 'theta_center_deg', ...
     'apertures_deg', 'f_center', 'lambda_c', 'B', 'delta_r', 'c', ...
@@ -625,7 +643,7 @@ save(sarDataFile, 'results_fft', 'results_psf', 'results_clean', ...
 fprintf('  MAT data: %s\n', sarDataFile);
 
 % 导出文本结果
-txtFile = fullfile('results', ['sar_metrics_' nowStr '.txt']);
+txtFile = fullfile(resultDir, ['sar_metrics_' nowStr '.txt']);
 fid = fopen(txtFile, 'w');
 fprintf(fid, '# SAR Imaging Metrics Summary\n');
 fprintf(fid, '# Generated: %s\n', nowStr);
